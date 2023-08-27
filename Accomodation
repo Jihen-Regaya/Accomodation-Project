@@ -1,0 +1,169 @@
+# %% 
+import re
+import csv
+import nltk
+import string
+import pandas as pd 
+import numpy as np 
+import matplotlib.pyplot as plt
+
+from itertools import chain
+from collections import Counter
+#from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
+from nltk.tokenize import word_tokenize
+from sklearn.metrics import pairwise_distances
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import AgglomerativeClustering
+from sklearn.metrics.pairwise import cosine_similarity
+from scipy.cluster.hierarchy import dendrogram, linkage
+from sklearn.feature_extraction.text import TfidfVectorizer 
+
+nltk.download('punkt')
+
+# %%
+# read csv file and extract en_name column
+df = pd.read_csv("full_accomodations.csv")
+en_name_column = df['en_name']
+
+def contains_arabic_letters(input_string):
+    # Regular expression pattern to match Arabic Unicode character range
+    arabic_pattern = re.compile(r'[\u0600-\u06FF]+')
+
+    # Search for Arabic letters in the input string
+    if arabic_pattern.search(input_string):
+        return True
+    else:
+        return False
+
+en_name_column = en_name_column[~en_name_column.astype(str).apply(contains_arabic_letters)]
+
+# %%
+# clean data (Duplicates/ NAN values and empty cells)
+en_name_column.drop_duplicates(inplace=True)
+en_name_column.dropna(inplace=True)
+print(en_name_column)
+
+#%%
+# modify the list of en_name column to enhance tokenization
+char_to_replace = '-'
+replacement_char = ' '
+en_name_column1 = en_name_column.str.replace(char_to_replace, replacement_char)
+en_name_column2 = [i.lower() for i in en_name_column1]
+print(en_name_column2)
+
+# %%
+# Tokenization
+tokenized_list = [word_tokenize(sentence) for sentence in en_name_column2]
+print(tokenized_list)
+flattened_tokens = [token for tokens in tokenized_list for token in tokens]
+word_frequency = Counter(flattened_tokens)
+print(word_frequency)
+stop_words_list = ["the","al","el","group","a","'s","and","for","'","branch","of","-","(",")","by"]
+
+# %%
+# delete stop words and print back the list of hotels
+en_name_column4 = en_name_column2.copy()
+for i in range(len(en_name_column4)):
+    for word in stop_words_list:
+        if word in en_name_column4[i].split():
+            en_name_column4[i] = en_name_column4[i].replace(word, '').strip()
+print(en_name_column4)
+
+#%%
+# TF-IDF
+tfidf_vectorizer = TfidfVectorizer()
+tfidf_matrix = tfidf_vectorizer.fit_transform(en_name_column4)
+print(tfidf_matrix)
+
+#%%
+# k_means Clustering
+'''
+chosen_k = 100
+
+kmeans = KMeans(n_clusters=chosen_k, random_state=0)
+cluster_labels = kmeans.fit_predict(tfidf_matrix)
+print(cluster_labels)
+
+clusters = {i: [] for i in range(chosen_k)}
+
+for i, doc in enumerate(en_name_column4):
+    cluster = cluster_labels[i]
+    clusters[cluster].append(doc)
+     
+for i in range(chosen_k):
+    print(f"Cluster {i + 1}:")
+    for doc in clusters[i]:
+        print(f" - {doc}")
+    print()
+
+pca = PCA(n_components=3)
+tfidf_matrix_reduced_3d = pca.fit_transform(tfidf_matrix.toarray())
+
+fig = plt.figure(figsize=(10, 8))
+ax = fig.add_subplot(111, projection='3d')
+for i in range(chosen_k):
+    cluster_indices = np.where(cluster_labels == i)[0]
+    cluster_points = tfidf_matrix_reduced_3d[cluster_indices]
+    ax.scatter(cluster_points[:, 0], cluster_points[:, 1], cluster_points[:, 2], label=f"Cluster {i+1}")
+
+ax.set_xlabel("Principal Component 1")
+ax.set_ylabel("Principal Component 2")
+ax.set_zlabel("Principal Component 3")
+ax.set_title("K-Means Clustering with 3 Clusters (3D Visualization)")
+ax.legend()
+plt.show()
+'''
+
+#%%
+# Agglomerative Clustering 
+clustering = AgglomerativeClustering(linkage="ward", n_clusters=None, distance_threshold=0.75)
+cluster_labels = clustering.fit_predict(tfidf_matrix.toarray())
+print(tfidf_matrix.toarray().shape)
+print(np.array(tfidf_matrix).shape)
+print(clustering.labels_)
+print(clustering.n_clusters_)
+# Create a dictionary to store data points for each cluster label
+cluster_data = {}
+
+# Iterate through each cluster label and corresponding data points
+for cluster_id in set(clustering.labels_):
+    cluster_indices = [index for index, label in enumerate(clustering.labels_) if label == cluster_id]
+    
+    # Store data points of the current cluster in the dictionary
+    cluster_data[cluster_id] = [en_name_column4[index] for index in cluster_indices]
+
+# Print the unique cluster labels and their corresponding data points
+for cluster_id, data_points in cluster_data.items():
+    print(f"Cluster {cluster_id}:")
+    for index, data_point_values in enumerate(data_points):
+        print(f"Data point {index}: {data_point_values}")
+    print("\n")
+    
+    
+#%%
+# Evaluating Results
+# Exporting the unique hotel names and their duplicates in a csv file
+
+# Duplicate hotel names CSV file
+data = {'Cluster': [], 'Data Points': []}
+
+for cluster, data_points in cluster_data.items():
+    data['Cluster'].append(cluster)
+    data['Data Points'].append(", ".join(data_points))
+
+df = pd.DataFrame(data)
+df.to_csv('clustered_data.csv', index=False)
+print("CSV file 'clustered_data.csv' created.")
+
+# Unique hotel names CSV file
+unique_hotel_names = set()
+for data_points in cluster_data.values():
+    for data_point in data_points:
+        unique_hotel_names.add(data_point)
+
+data = {'Unique Hotel Names': list(unique_hotel_names)}
+df = pd.DataFrame(data)
+df.to_csv('unique_hotel_names.csv', index=False)
+print("CSV file 'unique_hotel_names.csv' created.")
+#%%
